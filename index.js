@@ -1,0 +1,200 @@
+require('dotenv').config();
+const express = require('express');
+const cors = require('cors');
+const { MongoClient, ServerApiVersion } = require('mongodb');
+
+const app = express();
+const port = process.env.PORT || 5000
+
+
+
+const admin = require("firebase-admin");
+
+const serviceAccount = require("./firebase-secret-key.json");
+
+admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount)
+});
+
+
+
+
+// Middleware
+app.use(cors());
+app.use(express.json());
+
+const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.ojps7gr.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
+
+// Create a MongoClient with a MongoClientOptions object to set the Stable API version
+const client = new MongoClient(uri, {
+    serverApi: {
+        version: ServerApiVersion.v1,
+        strict: true,
+        deprecationErrors: true,
+    }
+});
+
+
+const verifyFirebaseToken = async (req, res, next) => {
+    const authHeader = req.headers.authorization;
+    //   console.log("🚀 ~ verifyFirebaseToken ~ authHeader:", authHeader);
+
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+        return res.status(401).json({ message: "Unauthorized: No token provided" });
+    }
+
+    const idToken = authHeader.split(" ")[1];
+
+    try {
+        const decodedToken = await admin.auth().verifyIdToken(idToken);
+        req.firebaseUser = decodedToken;
+        next();
+    } catch (error) {
+        return res
+            .status(401)
+            .json({ message: "Unauthorized: Invalid token from catch" });
+    }
+};
+
+
+async function run() {
+    try {
+        // Connect the client to the server	(optional starting in v4.7)
+        await client.connect();
+
+
+        const db = client.db('unitSphereDB');
+        const apartmentsCollection = db.collection('apartments');
+        const agreementCollection = db.collection('agreement')
+        const usersCollection = db.collection('users')
+
+        // GET API for apartments with pagination
+        // GET API for apartments with pagination and rent range
+        app.get('/apartments', async (req, res) => {
+            const page = parseInt(req.query.page) || 1;
+            const limit = parseInt(req.query.limit) || 6;
+            const skip = (page - 1) * limit;
+
+            const minRent = parseFloat(req.query.minRent);
+            const maxRent = parseFloat(req.query.maxRent);
+
+            let query = {};
+
+            if (!isNaN(minRent) && !isNaN(maxRent)) {
+                query.rent = { $gte: minRent, $lte: maxRent };
+            }
+
+            const total = await apartmentsCollection.countDocuments(query);
+
+            const apartments = await apartmentsCollection
+                .find(query)
+                .skip(skip)
+                .limit(limit)
+                .toArray();
+
+            res.send({
+                apartments,
+                total,
+            });
+        });
+
+
+
+
+        app.post('/agreements', async (req, res) => {
+            const agreement = req.body;
+            const { userEmail } = agreement;
+
+            try {
+
+                const existing = await agreementCollection.findOne({ userEmail });
+
+                if (existing) {
+                    return res.status(400).send({ error: true, message: 'User has already applied for an apartment.' });
+                }
+
+                const result = await agreementCollection.insertOne(agreement);
+                res.send({ insertedId: result.insertedId });
+            } catch (err) {
+                res.status(500).send({ error: true, message: 'Internal Server Error' });
+            }
+        });
+
+        // post user 
+
+        app.post("/add-user", async (req, res) => {
+            const userData = req.body;
+
+            console.log(userData);
+
+            const find_result = await usersCollection.findOne({
+                email: userData.email,
+            })
+
+            if (find_result) {
+                res.send({ msg: "user already exist" })
+            } else {
+                const result = await usersCollection.insertOne(userData)
+                res.send(result)
+            }
+
+        })
+
+        // get user role 
+
+        app.get("/user-role", verifyFirebaseToken, async (req, res) => {
+            // console.log(req.firebaseUser);
+
+            const user = await usersCollection.findOne({ email: req.firebaseUser.email })
+            res.send({ msg: "ok", role: user.role })
+
+            res.send({ msg: "hello" })
+        })
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        // Send a ping to confirm a successful connection
+        await client.db("admin").command({ ping: 1 });
+        console.log("Pinged your deployment. You successfully connected to MongoDB!");
+    } finally {
+        // Ensures that the client will close when you finish/error
+        // await client.close();
+    }
+}
+run().catch(console.dir);
+
+
+
+
+app.get('/', (req, res) => {
+    res.send('Building Management Server is running ✅');
+});
+
+
+app.listen(port, () => {
+    console.log(`Server is running on port ${port}`);
+})
