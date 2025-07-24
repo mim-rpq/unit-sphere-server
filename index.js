@@ -162,7 +162,16 @@ async function run() {
 
         })
 
-     
+        // remove member or update user
+        app.patch('/users/remove-member/:id', async (req, res) => {
+            const userId = req.params.id;
+            const result = await usersCollection.updateOne(
+                { _id: new ObjectId(userId) },
+                { $set: { role: 'user' } }
+            );
+            res.send(result);
+        });
+
 
 
 
