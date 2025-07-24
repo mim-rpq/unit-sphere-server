@@ -70,7 +70,20 @@ async function run() {
         const agreementCollection = db.collection('agreement')
         const usersCollection = db.collection('users')
 
-        // GET API for apartments with pagination
+
+        const verifyAdmin = async (req, res, next) => {
+            const user = await userCollection.findOne({
+                email: req.firebaseUser.email,
+            });
+
+            if (user.role === "admin") {
+                next();
+            } else {
+                res.status(403).send({ msg: "unauthorized" });
+            }
+        };
+
+      
         // GET API for apartments with pagination and rent range
         app.get('/apartments', async (req, res) => {
             const page = parseInt(req.query.page) || 1;
@@ -115,7 +128,7 @@ async function run() {
 
         // get all user for admin 
 
-        app.get("/users",  verifyFirebaseToken,async (req, res) => {
+        app.get("/users", verifyFirebaseToken, verifyAdmin, async (req, res) => {
 
             const users = await usersCollection.find({}).toArray();
             res.send(users)
@@ -123,6 +136,8 @@ async function run() {
         })
 
 
+
+        // post agreement /
         app.post('/agreements', async (req, res) => {
             const agreement = req.body;
             const { userEmail } = agreement;
