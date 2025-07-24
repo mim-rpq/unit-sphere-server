@@ -35,9 +35,10 @@ const client = new MongoClient(uri, {
 });
 
 
+
 const verifyFirebaseToken = async (req, res, next) => {
     const authHeader = req.headers.authorization;
-    //   console.log("🚀 ~ verifyFirebaseToken ~ authHeader:", authHeader);
+    //  console.log("Authorization header:", authHeader); 
 
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
         return res.status(401).json({ message: "Unauthorized: No token provided" });
@@ -47,6 +48,7 @@ const verifyFirebaseToken = async (req, res, next) => {
 
     try {
         const decodedToken = await admin.auth().verifyIdToken(idToken);
+
         req.firebaseUser = decodedToken;
         next();
     } catch (error) {
@@ -99,6 +101,26 @@ async function run() {
         });
 
 
+        // get user role 
+
+        app.get("/user-role", verifyFirebaseToken, async (req, res) => {
+            // console.log(req.firebaseUser);
+
+            const user = await usersCollection.findOne({ email: req.firebaseUser.email })
+            res.send({ msg: "ok", role: user.role })
+
+            res.send({ msg: "hello" })
+        })
+
+
+        // get all user for admin 
+
+        app.get("/users",  verifyFirebaseToken,async (req, res) => {
+
+            const users = await usersCollection.find({}).toArray();
+            res.send(users)
+
+        })
 
 
         app.post('/agreements', async (req, res) => {
@@ -140,19 +162,7 @@ async function run() {
 
         })
 
-        // get user role 
-
-        app.get("/user-role", verifyFirebaseToken, async (req, res) => {
-            // console.log(req.firebaseUser);
-
-            const user = await usersCollection.findOne({ email: req.firebaseUser.email })
-            res.send({ msg: "ok", role: user.role })
-
-            res.send({ msg: "hello" })
-        })
-
-
-
+     
 
 
 
