@@ -1,7 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const { MongoClient, ServerApiVersion } = require('mongodb');
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 
 const app = express();
 const port = process.env.PORT || 5000
@@ -69,10 +69,11 @@ async function run() {
         const apartmentsCollection = db.collection('apartments');
         const agreementCollection = db.collection('agreement')
         const usersCollection = db.collection('users')
+        const announcementCollection = db.collection('announcements');
 
 
         const verifyAdmin = async (req, res, next) => {
-            const user = await userCollection.findOne({
+            const user = await usersCollection.findOne({
                 email: req.firebaseUser.email,
             });
 
@@ -83,7 +84,7 @@ async function run() {
             }
         };
 
-      
+
         // GET API for apartments with pagination and rent range
         app.get('/apartments', async (req, res) => {
             const page = parseInt(req.query.page) || 1;
@@ -122,18 +123,28 @@ async function run() {
             const user = await usersCollection.findOne({ email: req.firebaseUser.email })
             res.send({ msg: "ok", role: user.role })
 
-            res.send({ msg: "hello" })
         })
 
 
         // get all user for admin 
 
-        app.get("/users", verifyFirebaseToken, verifyAdmin, async (req, res) => {
 
-            const users = await usersCollection.find({}).toArray();
-            res.send(users)
 
-        })
+
+        app.get("/users", verifyFirebaseToken, verifyAdmin,
+            //      async (req, res) => {
+
+            //     const users = await usersCollection.find({}).toArray();
+            //     res.send(users)
+
+            // }
+            async (req, res) => {
+                const users = await usersCollection
+                    .find({ email: { $ne: req.firebaseUser.email } })
+                    .toArray();
+                res.send(users);
+            }
+        )
 
 
 
@@ -157,7 +168,7 @@ async function run() {
             }
         });
 
-        // post user 
+        // POST: user 
 
         app.post("/add-user", async (req, res) => {
             const userData = req.body;
@@ -177,8 +188,29 @@ async function run() {
 
         })
 
+
+        // POST: create an announcement
+        app.post("/announcements", verifyFirebaseToken, verifyAdmin, async (req, res) => {
+            const { title, description } = req.body;
+
+            if (!title || !description) {
+                return res.status(400).json({ error: true, message: "Title and description are required" });
+            }
+
+            const result = await announcementCollection.insertOne({
+                title,
+                description,
+                createdAt: new Date(),
+                author: req.firebaseUser.email,
+            });
+
+            res.status(201).json({ insertedId: result.insertedId });
+        });
+
+
+
         // remove member or update user
-        app.patch('/users/remove-member/:id', async (req, res) => {
+        app.patch('/users/remove-member/:id', verifyAdmin, async (req, res) => {
             const userId = req.params.id;
             const result = await usersCollection.updateOne(
                 { _id: new ObjectId(userId) },
