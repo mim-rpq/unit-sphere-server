@@ -115,7 +115,7 @@ async function run() {
         });
 
 
-        // get user role 
+        // GET: user role 
 
         app.get("/user-role", verifyFirebaseToken, async (req, res) => {
             // console.log(req.firebaseUser);
@@ -126,7 +126,7 @@ async function run() {
         })
 
 
-        // get all user for admin 
+        // GET: all user for admin 
 
 
 
@@ -146,6 +146,12 @@ async function run() {
             }
         )
 
+        // GET: pending requests 
+
+        app.get("/agreements/pending", verifyFirebaseToken, verifyAdmin, async (req, res) => {
+            const requests = await agreementCollection.find({ status: "pending" }).toArray();
+            res.send(requests);
+        });
 
 
         // post agreement /
@@ -219,7 +225,19 @@ async function run() {
             res.send(result);
         });
 
+        // Accept agreement 
+        app.patch("/agreements/accept/:id", verifyFirebaseToken, verifyAdmin, async (req, res) => {
+            const id = req.params.id;
+            const agreement = await agreementCollection.findOne({ _id: new ObjectId(id) });
 
+            // Update status to checked
+            await agreementCollection.updateOne({ _id: new ObjectId(id) }, { $set: { status: "checked" } });
+
+            // Update user's role to member
+            await usersCollection.updateOne({ email: agreement.userEmail }, { $set: { role: "member" } });
+
+            res.send({ success: true });
+        });
 
 
 
