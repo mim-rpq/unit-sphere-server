@@ -70,6 +70,7 @@ async function run() {
         const agreementCollection = db.collection('agreement')
         const usersCollection = db.collection('users')
         const announcementCollection = db.collection('announcements');
+        const couponCollection = db.collection('coupons');
 
 
         const verifyAdmin = async (req, res, next) => {
@@ -127,17 +128,7 @@ async function run() {
 
 
         // GET: all user for admin 
-
-
-
-
         app.get("/users", verifyFirebaseToken, verifyAdmin,
-            //      async (req, res) => {
-
-            //     const users = await usersCollection.find({}).toArray();
-            //     res.send(users)
-
-            // }
             async (req, res) => {
                 const users = await usersCollection
                     .find({ email: { $ne: req.firebaseUser.email } })
@@ -153,8 +144,14 @@ async function run() {
             res.send(requests);
         });
 
+        // GET: get all coupons 
+        app.get("/coupons", verifyFirebaseToken, verifyAdmin, async (req, res) => {
+            const coupons = await couponCollection.find().toArray();
+            res.send(coupons);
+        });
 
-        // post agreement /
+
+        // post agreement 
         app.post('/agreements', async (req, res) => {
             const agreement = req.body;
             const { userEmail } = agreement;
@@ -213,9 +210,17 @@ async function run() {
             res.status(201).json({ insertedId: result.insertedId });
         });
 
+        // POST: coupons 
+        app.post("/coupons", verifyFirebaseToken, verifyAdmin, async (req, res) => {
+            const coupon = req.body;
+            coupon.createdAt = new Date();
+            const result = await couponCollection.insertOne(coupon);
+            res.send(result);
+        });
 
 
-        // remove member or update user
+
+        //POST: remove member or update user
         app.patch('/users/remove-member/:id', verifyAdmin, async (req, res) => {
             const userId = req.params.id;
             const result = await usersCollection.updateOne(
@@ -225,6 +230,8 @@ async function run() {
             res.send(result);
         });
 
+
+
         //PATCH: Accept agreement 
         app.patch("/agreements/accept/:id", verifyFirebaseToken, verifyAdmin, async (req, res) => {
             const id = req.params.id;
@@ -233,14 +240,15 @@ async function run() {
             // Update status to checked
             await agreementCollection.updateOne({ _id: new ObjectId(id) }, { $set: { status: "checked" } });
 
-            // Update user's role to member
+            // Update role to member
             await usersCollection.updateOne({ email: agreement.userEmail }, { $set: { role: "member" } });
 
             res.send({ success: true });
         });
 
+
         //  PATCH: Reject agreement request  
-           app.patch("/agreements/reject/:id", verifyFirebaseToken, verifyAdmin, async (req, res) => {
+        app.patch("/agreements/reject/:id", verifyFirebaseToken, verifyAdmin, async (req, res) => {
             const id = req.params.id;
 
             const query = { _id: new ObjectId(id) };
@@ -251,13 +259,6 @@ async function run() {
             res.send(result);
 
         });
-
-
-
-
-
-
-
 
 
 
