@@ -225,7 +225,7 @@ async function run() {
             res.send(result);
         });
 
-        // Accept agreement 
+        //PATCH: Accept agreement 
         app.patch("/agreements/accept/:id", verifyFirebaseToken, verifyAdmin, async (req, res) => {
             const id = req.params.id;
             const agreement = await agreementCollection.findOne({ _id: new ObjectId(id) });
@@ -239,8 +239,18 @@ async function run() {
             res.send({ success: true });
         });
 
+        //  PATCH: Reject agreement request  
+           app.patch("/agreements/reject/:id", verifyFirebaseToken, verifyAdmin, async (req, res) => {
+            const id = req.params.id;
 
+            const query = { _id: new ObjectId(id) };
+            const updateDoc = { $set: { status: "checked" } };
 
+            const result = await agreementCollection.updateOne(query, updateDoc);
+
+            res.send(result);
+
+        });
 
 
 
