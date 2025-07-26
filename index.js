@@ -138,14 +138,19 @@ async function run() {
         )
 
         // GET: Get a single user by email
-        app.get("/users/:email", verifyFirebaseToken, async (req, res) => {
-            const email = req.params.email;
+        app.get("/users/me", verifyFirebaseToken, async (req, res) => {
+            const email = req.firebaseUser.email;
 
-            // Optional: Ensure the user is accessing only their own data
-            if (email !== req.firebaseUser.email) {
-                return res.status(403).send({ error: "Forbidden access" });
+            if (!email) {
+                return res.status(401).send({ error: "Unauthorized access" });
             }
+
             const user = await usersCollection.findOne({ email });
+
+            if (!user) {
+                return res.status(404).send({ error: "User not found" });
+            }
+
             res.send(user);
         });
 
@@ -170,8 +175,39 @@ async function run() {
             res.send(coupons);
         });
 
+        // GET:announcements 
+        app.get('/announcements', verifyFirebaseToken, async (req, res) => {
+            const announcements = await announcementCollection.find({}).toArray();
+            res.send(announcements);
+        });
 
 
+        // GET:profile details 
+        app.get('/member-profile', verifyFirebaseToken, async (req, res) => {
+            const userEmail = req.query.email || req.firebaseUser.email;
+
+            if (!userEmail) {
+                return res.status(400).send({ error: 'Email is required' });
+            }
+
+            const agreement = await agreementCollection.findOne({ userEmail, status: 'checked' });
+
+            const profileData = {
+                fullName: agreement.userName,
+                emailAddress: agreement.userEmail,
+                profilePicture: agreement.photo,
+                membershipStartDate: agreement.acceptDate,
+                floorNumber: agreement.floorNo,
+                blockName: agreement.blockName,
+                apartmentNumber: agreement.apartmentNo,
+                monthlyRent: agreement.rent,
+            };
+
+            res.send(profileData);
+        });
+
+
+        // POST ---------------------------------------POST------------------------------------------------POST//
 
         // post agreement 
         app.post('/agreements', async (req, res) => {
@@ -270,6 +306,11 @@ async function run() {
                         acceptDate: acceptDate
                     }
                 }
+            );
+
+            await usersCollection.updateOne(
+                { email: agreement.userEmail },
+                { $set: { role: "member" } }
             );
 
             res.send({ success: true });
