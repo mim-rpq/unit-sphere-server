@@ -137,6 +137,19 @@ async function run() {
             }
         )
 
+        // GET: Get a single user by email
+        app.get("/users/:email", verifyFirebaseToken, async (req, res) => {
+            const email = req.params.email;
+
+            // Optional: Ensure the user is accessing only their own data
+            if (email !== req.firebaseUser.email) {
+                return res.status(403).send({ error: "Forbidden access" });
+            }
+            const user = await usersCollection.findOne({ email });
+            res.send(user);
+        });
+
+
         // GET: pending requests 
 
         app.get("/agreements/pending", verifyFirebaseToken, verifyAdmin, async (req, res) => {
@@ -144,11 +157,20 @@ async function run() {
             res.send(requests);
         });
 
-        // GET: get all coupons 
+
+        //  Admin: Get all coupons (including unavailable)
         app.get("/coupons", verifyFirebaseToken, verifyAdmin, async (req, res) => {
             const coupons = await couponCollection.find().toArray();
             res.send(coupons);
         });
+
+        //  Public: Get only available coupons
+        app.get("/coupons/available", async (req, res) => {
+            const coupons = await couponCollection.find({ available: true }).toArray();
+            res.send(coupons);
+        });
+
+
 
 
         // post agreement 
@@ -172,7 +194,6 @@ async function run() {
         });
 
         // POST: user 
-
         app.post("/add-user", async (req, res) => {
             const userData = req.body;
 
@@ -221,7 +242,7 @@ async function run() {
 
 
         //POST: remove member or update user
-        app.patch('/users/remove-member/:id', verifyAdmin, async (req, res) => {
+        app.patch('/users/remove-member/:id', verifyFirebaseToken, verifyAdmin, async (req, res) => {
             const userId = req.params.id;
             const result = await usersCollection.updateOne(
                 { _id: new ObjectId(userId) },
@@ -239,9 +260,17 @@ async function run() {
 
             // Update status to checked
             await agreementCollection.updateOne({ _id: new ObjectId(id) }, { $set: { status: "checked" } });
-
+            const acceptDate = new Date();
             // Update role to member
-            await usersCollection.updateOne({ email: agreement.userEmail }, { $set: { role: "member" } });
+            await agreementCollection.updateOne(
+                { _id: new ObjectId(id) },
+                {
+                    $set: {
+                        status: "checked",
+                        acceptDate: acceptDate
+                    }
+                }
+            );
 
             res.send({ success: true });
         });
@@ -259,6 +288,19 @@ async function run() {
             res.send(result);
 
         });
+
+        app.patch("/coupons/:id", verifyFirebaseToken, verifyAdmin, async (req, res) => {
+            const id = req.params.id;
+            const { available } = req.body;
+            const filter = { _id: new ObjectId(id) };
+            const updateDoc = {
+                $set: { available: available },
+            };
+
+            const result = await couponCollection.updateOne(filter, updateDoc);
+            res.send(result);
+        });
+
 
         // DELETE: coupons
         app.delete("/coupons/:id", verifyFirebaseToken, verifyAdmin, async (req, res) => {
