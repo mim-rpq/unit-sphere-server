@@ -2,26 +2,24 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
-
-const app = express();
-const port = process.env.PORT || 5000
-
-
-
+const stripe = require('stripe')(process.env.PAYMENT_GATEWAY_KEY)
 const admin = require("firebase-admin");
-
-const serviceAccount = require("./firebase-secret-key.json");
-
-admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount)
-});
-
-
+const app = express();
+const port = process.env.PORT || 5000;
 
 
 // Middleware
 app.use(cors());
 app.use(express.json());
+
+
+
+const decodedServiceKey = Buffer.from(process.env.FB_SERVICE_KEY, 'base64').toString('utf8');
+const serviceAccount = JSON.parse(decodedServiceKey);
+
+admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount)
+});
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.ojps7gr.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
 
@@ -38,7 +36,7 @@ const client = new MongoClient(uri, {
 
 const verifyFirebaseToken = async (req, res, next) => {
     const authHeader = req.headers.authorization;
-    //  console.log("Authorization header:", authHeader); 
+    console.log("Authorization header:", authHeader);
 
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
         return res.status(401).json({ message: "Unauthorized: No token provided" });
@@ -62,7 +60,7 @@ const verifyFirebaseToken = async (req, res, next) => {
 async function run() {
     try {
         // Connect the client to the server	(optional starting in v4.7)
-        await client.connect();
+        // await client.connect();
 
 
         const db = client.db('unitSphereDB');
@@ -71,6 +69,7 @@ async function run() {
         const usersCollection = db.collection('users')
         const announcementCollection = db.collection('announcements');
         const couponCollection = db.collection('coupons');
+        const paymentsCollection = db.collection('payments');
 
 
         const verifyAdmin = async (req, res, next) => {
@@ -84,6 +83,19 @@ async function run() {
                 res.status(403).send({ msg: "unauthorized" });
             }
         };
+
+        const verifyAdminOrMember = async (req, res, next) => {
+            const user = await usersCollection.findOne({
+                email: req.firebaseUser.email,
+            });
+
+            if (user.role === "admin" || user.role === "member") {
+                next();
+            } else {
+                res.status(403).json({ message: "Forbidden: Admin or Member only." });
+            }
+        };
+
 
 
         // GET API for apartments with pagination and rent range
@@ -140,17 +152,7 @@ async function run() {
         // GET: Get a single user by email
         app.get("/users/me", verifyFirebaseToken, async (req, res) => {
             const email = req.firebaseUser.email;
-
-            if (!email) {
-                return res.status(401).send({ error: "Unauthorized access" });
-            }
-
             const user = await usersCollection.findOne({ email });
-
-            if (!user) {
-                return res.status(404).send({ error: "User not found" });
-            }
-
             res.send(user);
         });
 
@@ -183,13 +185,8 @@ async function run() {
 
 
         // GET:profile details 
-        app.get('/member-profile', verifyFirebaseToken, async (req, res) => {
+        app.get('/agreements/my', verifyFirebaseToken, verifyAdminOrMember, async (req, res) => {
             const userEmail = req.query.email || req.firebaseUser.email;
-
-            if (!userEmail) {
-                return res.status(400).send({ error: 'Email is required' });
-            }
-
             const agreement = await agreementCollection.findOne({ userEmail, status: 'checked' });
 
             const profileData = {
@@ -206,34 +203,79 @@ async function run() {
             res.send(profileData);
         });
 
+        // Get: payment history 
+        app.get('/payments', verifyFirebaseToken, verifyAdminOrMember, async (req, res) => {
+            const email = req.firebaseUser.email;
+
+            const payments = await paymentsCollection
+                .find({ userEmail: email })
+                .sort({ paymentDate: -1 })
+                .toArray();
+
+            res.send(payments);
+        });
+
+        // GET /rooms/stats
+        app.get('/rooms/stats', async (req, res) => {
+            const total = await apartmentsCollection.countDocuments();
+            const available = await apartmentsCollection.countDocuments({ availability: 'available' });
+            const unavailable = await apartmentsCollection.countDocuments({ availability: { $ne: 'available' } });
+            res.send({ total, available, unavailable });
+        });
+
+        // GET /users/count
+        app.get('/users/count', async (req, res) => {
+            const count = await usersCollection.countDocuments({ role: 'user' });
+            res.send({ count });
+        });
+
+        // GET /members/count
+        app.get('/members/count', async (req, res) => {
+            const count = await usersCollection.countDocuments({ role: 'member' });
+            res.send({ count });
+        });
+
+
 
         // POST ---------------------------------------POST------------------------------------------------POST//
 
+        app.post('/create-payment-intent', verifyFirebaseToken, async (req, res) => {
+
+            const rentInCents = req.body.rentInCents
+            try {
+                const paymentIntent = await stripe.paymentIntents.create({
+                    amount: rentInCents,
+                    currency: 'usd',
+                    payment_method_types: ['card']
+                })
+                res.json({ clientSecret: paymentIntent.client_secret })
+            } catch (error) {
+                res.status(500).json({ error: error.message })
+            }
+        })
+
+
         // post agreement 
-        app.post('/agreements', async (req, res) => {
+        app.post('/agreements', verifyFirebaseToken, async (req, res) => {
             const agreement = req.body;
             const { userEmail } = agreement;
 
-            try {
+            const existing = await agreementCollection.findOne({ userEmail });
 
-                const existing = await agreementCollection.findOne({ userEmail });
-
-                if (existing) {
-                    return res.status(400).send({ error: true, message: 'User has already applied for an apartment.' });
-                }
-
-                const result = await agreementCollection.insertOne(agreement);
-                res.send({ insertedId: result.insertedId });
-            } catch (err) {
-                res.status(500).send({ error: true, message: 'Internal Server Error' });
+            if (existing) {
+                return res.status(400).send({ error: true, message: "You have already applied for an apartment." });
             }
+
+            const result = await agreementCollection.insertOne(agreement);
+            res.send({ insertedId: result.insertedId });
         });
+
 
         // POST: user 
         app.post("/add-user", async (req, res) => {
             const userData = req.body;
 
-            console.log(userData);
+            // console.log(userData);
 
             const find_result = await usersCollection.findOne({
                 email: userData.email,
@@ -252,11 +294,6 @@ async function run() {
         // POST: create an announcement
         app.post("/announcements", verifyFirebaseToken, verifyAdmin, async (req, res) => {
             const { title, description } = req.body;
-
-            if (!title || !description) {
-                return res.status(400).json({ error: true, message: "Title and description are required" });
-            }
-
             const result = await announcementCollection.insertOne({
                 title,
                 description,
@@ -275,6 +312,44 @@ async function run() {
             res.send(result);
         });
 
+        app.post('/validate-coupon', verifyAdminOrMember, async (req, res) => {
+            const { code, originalAmount } = req.body;
+
+            if (!code || !originalAmount) {
+                return res.status(200).send({ valid: false, message: 'Missing coupon code or amount.' });
+            }
+
+            const coupon = await couponCollection.findOne({ code: code.toUpperCase(), available: true });
+
+            if (!coupon) {
+                return res.status(200).send({ valid: false, message: 'Invalid or unavailable coupon.' });
+            }
+
+            const now = new Date();
+            if (coupon.expiresAt && new Date(coupon.expiresAt) < now) {
+                return res.status(200).send({ valid: false, message: 'Coupon expired.' });
+            }
+
+            const discountPercent = coupon.discount;
+            const discountAmount = (originalAmount * discountPercent) / 100;
+            const finalAmount = originalAmount - discountAmount;
+
+            return res.status(200).send({
+                valid: true,
+                discountPercent,
+                discountAmount,
+                finalAmount,
+                couponId: coupon._id
+            });
+        });
+
+        // payments
+        app.post('/payments', verifyFirebaseToken, verifyAdminOrMember, async (req, res) => {
+            const payment = req.body;
+            const result = await paymentsCollection.insertOne(payment);
+            res.send(result);
+        });
+
 
 
         //POST: remove member or update user
@@ -289,15 +364,13 @@ async function run() {
 
 
 
-        //PATCH: Accept agreement 
         app.patch("/agreements/accept/:id", verifyFirebaseToken, verifyAdmin, async (req, res) => {
             const id = req.params.id;
+
             const agreement = await agreementCollection.findOne({ _id: new ObjectId(id) });
 
-            // Update status to checked
-            await agreementCollection.updateOne({ _id: new ObjectId(id) }, { $set: { status: "checked" } });
+            // Update  status to 'checked' and save accept date
             const acceptDate = new Date();
-            // Update role to member
             await agreementCollection.updateOne(
                 { _id: new ObjectId(id) },
                 {
@@ -308,13 +381,20 @@ async function run() {
                 }
             );
 
+            // update user role to member 
             await usersCollection.updateOne(
                 { email: agreement.userEmail },
                 { $set: { role: "member" } }
             );
 
+            //  Mark  as booked 
+            await apartmentsCollection.updateOne(
+                { _id: new ObjectId(agreement.agreementId) },
+                { $set: { availability: "booked" } }
+            );
             res.send({ success: true });
         });
+
 
 
         //  PATCH: Reject agreement request  
@@ -366,8 +446,8 @@ async function run() {
 
 
         // Send a ping to confirm a successful connection
-        await client.db("admin").command({ ping: 1 });
-        console.log("Pinged your deployment. You successfully connected to MongoDB!");
+        // await client.db("admin").command({ ping: 1 });
+        // console.log("Pinged your deployment. You successfully connected to MongoDB!");
     } finally {
         // Ensures that the client will close when you finish/error
         // await client.close();
@@ -379,7 +459,7 @@ run().catch(console.dir);
 
 
 app.get('/', (req, res) => {
-    res.send('Building Management Server is running ✅');
+    res.send('Building Management Server is running ');
 });
 
 
