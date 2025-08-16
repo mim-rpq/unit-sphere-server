@@ -68,6 +68,7 @@ async function run() {
         const announcementCollection = db.collection('announcements');
         const couponCollection = db.collection('coupons');
         const paymentsCollection = db.collection('payments');
+        const testimonialCollection = db.collection('testimonials');
 
 
         const verifyAdmin = async (req, res, next) => {
@@ -168,6 +169,27 @@ async function run() {
             const coupons = await couponCollection.find().toArray();
             res.send(coupons);
         });
+
+
+        // GET: featured apartments 
+        app.get('/apartments/featured', async (req, res) => {
+                const query = { availability: "available"  };
+                const options = {
+                    sort: { rent: -1 }, 
+                    limit: 6
+                };
+                const result = await apartmentsCollection.find(query, options).toArray();
+                res.send(result);
+        });
+
+        // Get all testimonials
+
+        app.get('/testimonials', async (req, res) => {
+  const result = await testimonialCollection.find().toArray();
+  res.send(result);
+});
+      
+
 
         //  Public: Get only available coupons
         app.get("/coupons/available", async (req, res) => {
