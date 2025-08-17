@@ -69,6 +69,9 @@ async function run() {
         const couponCollection = db.collection('coupons');
         const paymentsCollection = db.collection('payments');
         const testimonialCollection = db.collection('testimonials');
+        const contactCollection = db.collection('contact');
+        const subscribersCollection = db.collection('subscribe');
+
 
 
         const verifyAdmin = async (req, res, next) => {
@@ -173,22 +176,22 @@ async function run() {
 
         // GET: featured apartments 
         app.get('/apartments/featured', async (req, res) => {
-                const query = { availability: "available"  };
-                const options = {
-                    sort: { rent: -1 }, 
-                    limit: 6
-                };
-                const result = await apartmentsCollection.find(query, options).toArray();
-                res.send(result);
+            const query = { availability: "available" };
+            const options = {
+                sort: { rent: -1 },
+                limit: 6
+            };
+            const result = await apartmentsCollection.find(query, options).toArray();
+            res.send(result);
         });
 
         // Get all testimonials
 
         app.get('/testimonials', async (req, res) => {
-  const result = await testimonialCollection.find().toArray();
-  res.send(result);
-});
-      
+            const result = await testimonialCollection.find().toArray();
+            res.send(result);
+        });
+
 
 
         //  Public: Get only available coupons
@@ -368,6 +371,37 @@ async function run() {
             const payment = req.body;
             const result = await paymentsCollection.insertOne(payment);
             res.send(result);
+        });
+
+        // POST: Contact 
+        app.post('/contact', verifyFirebaseToken, async (req, res) => {
+            const { name, email, message } = req.body;
+
+
+            const newContact = {
+                name,
+                email,
+                message,
+                createdAt: new Date()
+            };
+
+            const result = await contactCollection.insertOne(newContact);
+            res.send(result)
+
+        });
+
+        // server.js or index.js
+        app.post('/subscribe',  async (req, res) => {
+                const { email } = req.body;
+
+
+                const newSubscriber = {
+                    email,
+                    createdAt: new Date()
+                };
+
+                const result = await subscribersCollection.insertOne(newSubscriber);
+                res.send(result);
         });
 
 
